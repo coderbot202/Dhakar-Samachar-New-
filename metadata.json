@@ -1,0 +1,9 @@
+{
+  "name": "Dainik Hindi News",
+  "description": "A comprehensive Hindi news platform with reporter and editor dashboards, e-paper, and real-time updates.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
