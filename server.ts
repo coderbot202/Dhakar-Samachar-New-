@@ -1,13 +1,34 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import Database from "better-sqlite3";
+import multer from "multer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const db = new Database("news.db");
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+
+// Multer configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({ storage });
 
 // Initialize Database
 db.exec(`
@@ -100,6 +121,16 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json({ limit: '50mb' }));
+  app.use("/uploads", express.static(uploadsDir));
+
+  // Upload endpoint
+  app.post("/api/upload", upload.single("file"), (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    res.json({ url: fileUrl });
+  });
 
   // API Routes
   app.get("/api/news", (req, res) => {
@@ -109,9 +140,14 @@ async function startServer() {
       FROM articles a 
       JOIN categories c ON a.category_id = c.id 
       JOIN users u ON a.author_id = u.id
-      WHERE a.status = ?
+      WHERE 1=1
     `;
-    const params = [status];
+    const params = [];
+
+    if (status !== 'all') {
+      query += " AND a.status = ?";
+      params.push(status);
+    }
 
     if (category) {
       query += " AND c.slug = ?";
@@ -147,6 +183,21 @@ async function startServer() {
     res.json({ id: result.lastInsertRowid });
   });
 
+  app.put("/api/news/:id", (req, res) => {
+    const { title, content, image_url, category_id, location, is_breaking, status } = req.body;
+    db.prepare(`
+      UPDATE articles 
+      SET title = ?, content = ?, image_url = ?, category_id = ?, location = ?, is_breaking = ?, status = ?
+      WHERE id = ?
+    `).run(title, content, image_url, category_id, location, is_breaking ? 1 : 0, status, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/news/:id", (req, res) => {
+    db.prepare("DELETE FROM articles WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
   app.get("/api/categories", (req, res) => {
     const categories = db.prepare("SELECT * FROM categories").all();
     res.json(categories);
@@ -171,6 +222,28 @@ async function startServer() {
     res.json({ id: result.lastInsertRowid });
   });
 
+  app.delete("/api/shorts/:id", (req, res) => {
+    db.prepare("DELETE FROM shorts WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/categories", (req, res) => {
+    const { name, slug } = req.body;
+    const result = db.prepare("INSERT INTO categories (name, slug) VALUES (?, ?)").run(name, slug);
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.put("/api/categories/:id", (req, res) => {
+    const { name, slug } = req.body;
+    db.prepare("UPDATE categories SET name = ?, slug = ? WHERE id = ?").run(name, slug, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/categories/:id", (req, res) => {
+    db.prepare("DELETE FROM categories WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
   app.get("/api/stats", (req, res) => {
     const totalViews = db.prepare("SELECT SUM(views) as total FROM articles").get() as { total: number };
     const articleCount = db.prepare("SELECT COUNT(*) as count FROM articles").get() as { count: number };
@@ -180,6 +253,16 @@ async function startServer() {
       articles: articleCount.count,
       users: userCount.count
     });
+  });
+
+  app.get("/api/users", (req, res) => {
+    const users = db.prepare("SELECT * FROM users").all();
+    res.json(users);
+  });
+
+  app.delete("/api/users/:id", (req, res) => {
+    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
   });
 
   // Vite middleware for development

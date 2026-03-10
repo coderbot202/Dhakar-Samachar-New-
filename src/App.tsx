@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { 
   Menu, Search, Bell, Home, PlayCircle, Newspaper, Compass, User, 
   ChevronRight, Clock, MapPin, Share2, Bookmark, MessageSquare,
@@ -10,15 +10,46 @@ import {
   ImagePlus, UserSearch, AlertCircle, CheckCircle2, BookOpen,
   FileEdit, ChevronDown, Check, ArrowRight, ArrowLeft, MoreVertical,
   Navigation, Eye, UserCog, LayoutGrid,
-  Upload, Hourglass
+  Upload, Hourglass, Tag, Edit, Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 function cn(...inputs: any[]) {
   return twMerge(clsx(inputs));
 }
+
+// --- AI Service ---
+const generateSummary = async (content: string) => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash-exp",
+      contents: `Summarize the following news article in 3 short bullet points in Hindi: ${content}`,
+    });
+    return response.text;
+  } catch (error) {
+    console.error("AI Error:", error);
+    return "क्षमा करें, सारांश तैयार करने में त्रुटि हुई।";
+  }
+};
+
+const generateArticleDraft = async (topic: string) => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash-exp",
+      contents: `Write a detailed Hindi news article about: ${topic}. Include a catchy headline and structured paragraphs.`,
+    });
+    return response.text;
+  } catch (error) {
+    console.error("AI Error:", error);
+    return null;
+  }
+};
 
 // --- Types ---
 
@@ -173,9 +204,10 @@ const BottomNav = ({ activeTab }: { activeTab: string }) => (
         <Compass size={24} />
         <span className="text-[10px] font-medium">खोजें</span>
       </Link>
-      <Link to="/profile" className={cn("flex flex-col items-center justify-center", activeTab === 'profile' ? "text-[#e42127]" : "text-slate-500")}>
+      <Link to="/profile" className={cn("flex flex-col items-center justify-center relative", activeTab === 'profile' ? "text-[#e42127]" : "text-slate-500")}>
         <User size={24} />
         <span className="text-[10px] font-medium">प्रोफाइल</span>
+        <div className="absolute -top-1 -right-1 size-2 bg-indigo-500 rounded-full border border-white animate-pulse"></div>
       </Link>
     </div>
   </nav>
@@ -191,6 +223,10 @@ const Header = ({ categories = [] }: { categories?: Category[] }) => (
         <Link to="/" className="text-white text-xl font-bold tracking-tight">Dainik Hindi News</Link>
       </div>
       <div className="flex items-center gap-2">
+        <div className="hidden sm:flex items-center bg-white/10 rounded-full px-3 py-1 gap-2 border border-white/20">
+          <Radio size={14} className="text-white animate-pulse" />
+          <span className="text-[10px] text-white font-bold uppercase">AI Search</span>
+        </div>
         <button className="text-white hover:bg-white/10 p-2 rounded-lg transition-colors">
           <Search size={24} />
         </button>
@@ -260,11 +296,18 @@ const HomePage = () => {
             <Link className="text-[#e42127] text-sm font-bold flex items-center gap-1" to="/explore">सभी देखें <ChevronRight size={16} /></Link>
           </div>
 
-          {displayNews.filter(n => n.id !== breakingNews.id).map((news) => (
+          {displayNews.filter(n => n.id !== breakingNews.id).map((news, idx) => (
             <Link key={news.id} to={`/article/${news.id}`} className="bg-white dark:bg-[#211112]/40 rounded-xl p-3 shadow-sm flex gap-4 border border-slate-100 dark:border-slate-800 hover:border-[#e42127]/30 transition-all cursor-pointer">
               <div className="flex-1 flex flex-col justify-between">
                 <div>
-                  <span className="text-[#e42127] text-[11px] font-bold uppercase tracking-wider">{news.category_name}</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[#e42127] text-[11px] font-bold uppercase tracking-wider">{news.category_name}</span>
+                    {idx === 0 && (
+                      <span className="bg-indigo-100 text-indigo-700 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <Radio size={10} className="animate-pulse" /> AI TRENDING
+                      </span>
+                    )}
+                  </div>
                   <h4 className="font-bold text-base mt-1 line-clamp-2">{news.title}</h4>
                 </div>
                 <p className="text-slate-500 dark:text-slate-400 text-xs mt-2 flex items-center gap-1">
@@ -294,6 +337,16 @@ const HomePage = () => {
 const ArticlePage = () => {
   const { id } = useParams();
   const { data: news, loading } = useFetch<Article>(`/api/news/${id}`);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
+  const handleSummarize = async () => {
+    if (!news) return;
+    setIsSummarizing(true);
+    const summary = await generateSummary(news.content);
+    setAiSummary(summary);
+    setIsSummarizing(false);
+  };
 
   if (loading) return <div className="flex items-center justify-center h-screen"><Hourglass className="animate-spin text-[#e42127]" /></div>;
   if (!news) return <div className="p-10 text-center">लेख नहीं मिला।</div>;
@@ -319,6 +372,7 @@ const ArticlePage = () => {
           <h1 className="text-slate-900 dark:text-slate-100 text-3xl font-bold leading-tight mb-4">
             {news.title}
           </h1>
+          
           <div className="flex items-center gap-3 py-2 border-y border-[#e42127]/5">
             <div className="h-12 w-12 rounded-full border-2 border-[#e42127]/20 overflow-hidden">
               <img src={news.author_avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=Aditya"} alt="Author" className="w-full h-full object-cover" />
@@ -333,9 +387,30 @@ const ArticlePage = () => {
           </div>
         </div>
 
-        <div className="w-full px-0 sm:px-4 mb-6">
-          <img src={news.image_url} alt={news.title} className="w-full aspect-video sm:rounded-xl shadow-sm object-cover" />
-          <p className="px-4 mt-2 text-xs text-slate-500 italic">फोटो: {news.title} के दौरान का दृश्य।</p>
+        {/* AI Summary Section */}
+        <div className="px-4 mb-6">
+          <div className="bg-gradient-to-r from-[#e42127]/10 to-transparent p-4 rounded-2xl border border-[#e42127]/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Radio className="text-[#e42127] animate-pulse" size={18} />
+                <span className="text-sm font-bold text-[#e42127]">AI न्यूज़ सारांश</span>
+              </div>
+              {!aiSummary && (
+                <button 
+                  onClick={handleSummarize}
+                  disabled={isSummarizing}
+                  className="text-xs bg-[#e42127] text-white px-3 py-1 rounded-full font-bold disabled:opacity-50"
+                >
+                  {isSummarizing ? "तैयार हो रहा है..." : "सारांश देखें"}
+                </button>
+              )}
+            </div>
+            {aiSummary && (
+              <div className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
+                {aiSummary}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex gap-3 px-4 mb-6 overflow-x-auto pb-2 no-scrollbar">
@@ -477,8 +552,61 @@ const ShortsPage = () => {
 };
 
 const AdminDashboard = () => {
+  const [activeTab, setActiveTab] = useState<'articles' | 'shorts' | 'categories' | 'users'>('articles');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState<'created_at' | 'views' | 'status'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  
   const { data: stats } = useFetch<{ views: number, articles: number, users: number }>('/api/stats');
-  const { data: recentNews } = useFetch<Article[]>('/api/news?status=published');
+  const { data: recentNews } = useFetch<Article[]>(`/api/news?status=${statusFilter}`);
+  const { data: shorts } = useFetch<Short[]>('/api/shorts');
+  const { data: categories } = useFetch<Category[]>('/api/categories');
+  const { data: users } = useFetch<User[]>('/api/users');
+
+  const handleSort = (field: typeof sortBy) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('desc');
+    }
+  };
+
+  const sortedNews = [...(recentNews || [])].sort((a, b) => {
+    if (sortBy === 'views') {
+      return sortOrder === 'asc' ? a.views - b.views : b.views - a.views;
+    }
+    if (sortBy === 'status') {
+      const order = { 'draft': 0, 'pending': 1, 'published': 2 };
+      const valA = order[a.status as keyof typeof order] ?? 0;
+      const valB = order[b.status as keyof typeof order] ?? 0;
+      return sortOrder === 'asc' ? valA - valB : valB - valA;
+    }
+    return sortOrder === 'asc' 
+      ? new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  const handleDeleteShort = async (id: number) => {
+    if (confirm('क्या आप वाकई इस वीडियो को हटाना चाहते हैं?')) {
+      const res = await fetch(`/api/shorts/${id}`, { method: 'DELETE' });
+      if (res.ok) window.location.reload();
+    }
+  };
+
+  const handleDeleteCategory = async (id: number) => {
+    if (confirm('क्या आप वाकई इस श्रेणी को हटाना चाहते हैं?')) {
+      const res = await fetch(`/api/categories/${id}`, { method: 'DELETE' });
+      if (res.ok) window.location.reload();
+    }
+  };
+
+  const handleDeleteUser = async (id: number) => {
+    if (confirm('क्या आप वाकई इस उपयोगकर्ता को हटाना चाहते हैं?')) {
+      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+      if (res.ok) window.location.reload();
+    }
+  };
 
   return (
     <div className="flex min-h-screen bg-[#f8f6f6] dark:bg-[#211112]">
@@ -490,25 +618,37 @@ const AdminDashboard = () => {
           <h1 className="text-xl font-bold tracking-tight text-[#e42127]">Hindi न्यूज़</h1>
         </div>
         <nav className="flex-1 px-4 space-y-1 mt-4">
-          <Link to="/admin" className="flex items-center gap-3 px-3 py-3 rounded-lg bg-[#e42127]/10 border-r-4 border-[#e42127] text-[#e42127]">
+          <button 
+            onClick={() => setActiveTab('articles')}
+            className={cn("w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors", activeTab === 'articles' ? "bg-[#e42127]/10 border-r-4 border-[#e42127] text-[#e42127]" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100")}
+          >
             <LayoutDashboard size={20} />
-            <span className="font-medium">डैशबोर्ड</span>
-          </Link>
+            <span className="font-medium">लेख (Articles)</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('shorts')}
+            className={cn("w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors", activeTab === 'shorts' ? "bg-[#e42127]/10 border-r-4 border-[#e42127] text-[#e42127]" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100")}
+          >
+            <Video size={20} />
+            <span className="font-medium">शॉर्ट्स (Shorts)</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('categories')}
+            className={cn("w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors", activeTab === 'categories' ? "bg-[#e42127]/10 border-r-4 border-[#e42127] text-[#e42127]" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100")}
+          >
+            <Tag size={20} />
+            <span className="font-medium">श्रेणियां</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('users')}
+            className={cn("w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors", activeTab === 'users' ? "bg-[#e42127]/10 border-r-4 border-[#e42127] text-[#e42127]" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100")}
+          >
+            <Users size={20} />
+            <span className="font-medium">उपयोगकर्ता</span>
+          </button>
           <Link to="/publisher" className="flex items-center gap-3 px-3 py-3 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100">
             <PlusCircle size={20} />
             <span className="font-medium">नया कंटेंट</span>
-          </Link>
-          <Link to="/admin/articles" className="flex items-center gap-3 px-3 py-3 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100">
-            <FileText size={20} />
-            <span className="font-medium">लेख (Articles)</span>
-          </Link>
-          <Link to="/admin/users" className="flex items-center gap-3 px-3 py-3 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100">
-            <Users size={20} />
-            <span className="font-medium">उपयोगकर्ता</span>
-          </Link>
-          <Link to="/admin/settings" className="flex items-center gap-3 px-3 py-3 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100">
-            <Settings size={20} />
-            <span className="font-medium">सेटिंग्स</span>
           </Link>
         </nav>
       </aside>
@@ -563,35 +703,265 @@ const AdminDashboard = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="text-lg font-bold">हाल के प्रकाशित लेख</h3>
-              <button className="text-[#e42127] text-sm font-semibold">सभी देखें</button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm uppercase font-semibold">
-                  <tr>
-                    <th className="px-6 py-4">लेख का शीर्षक</th>
-                    <th className="px-6 py-4">श्रेणी</th>
-                    <th className="px-6 py-4">व्यूज</th>
-                    <th className="px-6 py-4">स्थिति</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {recentNews?.map(news => (
-                    <tr key={news.id} className="hover:bg-slate-50">
-                      <td className="px-6 py-4 font-medium truncate max-w-xs">{news.title}</td>
-                      <td className="px-6 py-4">{news.category_name}</td>
-                      <td className="px-6 py-4">{news.views}</td>
-                      <td className="px-6 py-4"><span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full text-xs">लाइव</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {activeTab === 'articles' && (
+              <>
+                <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">लेखों की सूची</h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase">फिल्टर:</span>
+                    <select 
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="text-sm border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1 bg-slate-50 dark:bg-slate-800 outline-none focus:ring-1 focus:ring-[#e42127]"
+                    >
+                      <option value="all">सभी (All)</option>
+                      <option value="published">प्रकाशित (Published)</option>
+                      <option value="pending">लंबित (Pending)</option>
+                      <option value="draft">ड्राफ्ट (Draft)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm uppercase font-semibold">
+                      <tr>
+                        <th className="px-6 py-4 cursor-pointer hover:text-[#e42127]" onClick={() => handleSort('created_at')}>लेख का शीर्षक</th>
+                        <th className="px-6 py-4">श्रेणी</th>
+                        <th className="px-6 py-4 cursor-pointer hover:text-[#e42127]" onClick={() => handleSort('views')}>व्यूज</th>
+                        <th className="px-6 py-4 cursor-pointer hover:text-[#e42127]" onClick={() => handleSort('status')}>स्थिति</th>
+                        <th className="px-6 py-4">एक्शन</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {sortedNews.length ? sortedNews.map(news => (
+                        <tr key={news.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                          <td className="px-6 py-4 font-medium truncate max-w-xs">{news.title}</td>
+                          <td className="px-6 py-4">{news.category_name}</td>
+                          <td className="px-6 py-4">{news.views}</td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-2 py-1 rounded-full text-xs font-bold",
+                              news.status === 'published' ? "bg-emerald-100 text-emerald-800" :
+                              news.status === 'pending' ? "bg-amber-100 text-amber-800" :
+                              "bg-slate-100 text-slate-800"
+                            )}>
+                              {news.status === 'published' ? 'लाइव' : news.status === 'pending' ? 'लंबित' : 'ड्राफ्ट'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <Link to={`/publisher?edit=${news.id}`} className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors">
+                                <Edit size={16} />
+                              </Link>
+                              <button 
+                                onClick={async () => {
+                                  if (confirm('क्या आप वाकई इस लेख को हटाना चाहते हैं?')) {
+                                    const res = await fetch(`/api/news/${news.id}`, { method: 'DELETE' });
+                                    if (res.ok) window.location.reload();
+                                  }
+                                }}
+                                className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-10 text-center text-slate-500">कोई लेख नहीं मिला।</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'shorts' && (
+              <>
+                <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">शॉर्ट्स की सूची</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm uppercase font-semibold">
+                      <tr>
+                        <th className="px-6 py-4">शीर्षक</th>
+                        <th className="px-6 py-4">व्यूज</th>
+                        <th className="px-6 py-4">लाइक्स</th>
+                        <th className="px-6 py-4">एक्शन</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {shorts?.length ? shorts.map(short => (
+                        <tr key={short.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                          <td className="px-6 py-4 font-medium truncate max-w-xs">{short.title}</td>
+                          <td className="px-6 py-4">{short.views}</td>
+                          <td className="px-6 py-4">{short.likes}</td>
+                          <td className="px-6 py-4">
+                            <button 
+                              onClick={() => handleDeleteShort(short.id)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-10 text-center text-slate-500">कोई शॉर्ट्स नहीं मिला।</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'categories' && (
+              <>
+                <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">श्रेणियों की सूची</h3>
+                  <button 
+                    onClick={async () => {
+                      const name = prompt('श्रेणी का नाम:');
+                      const slug = prompt('स्लग (Slug):');
+                      if (name && slug) {
+                        const res = await fetch('/api/categories', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name, slug })
+                        });
+                        if (res.ok) window.location.reload();
+                      }
+                    }}
+                    className="bg-[#e42127] text-white px-3 py-1 rounded-lg text-sm font-medium"
+                  >
+                    + नई श्रेणी
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm uppercase font-semibold">
+                      <tr>
+                        <th className="px-6 py-4">नाम</th>
+                        <th className="px-6 py-4">स्लग</th>
+                        <th className="px-6 py-4">एक्शन</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {categories?.length ? categories.map(cat => (
+                        <tr key={cat.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                          <td className="px-6 py-4 font-medium">{cat.name}</td>
+                          <td className="px-6 py-4">{cat.slug}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={async () => {
+                                  const name = prompt('नया नाम:', cat.name);
+                                  const slug = prompt('नया स्लग:', cat.slug);
+                                  if (name && slug) {
+                                    const res = await fetch(`/api/categories/${cat.id}`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ name, slug })
+                                    });
+                                    if (res.ok) window.location.reload();
+                                  }
+                                }}
+                                className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors"
+                              >
+                                <Edit size={16} />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteCategory(cat.id)}
+                                className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={3} className="px-6 py-10 text-center text-slate-500">कोई श्रेणी नहीं मिली।</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'users' && (
+              <>
+                <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">उपयोगकर्ताओं की सूची</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm uppercase font-semibold">
+                      <tr>
+                        <th className="px-6 py-4">नाम</th>
+                        <th className="px-6 py-4">ईमेल</th>
+                        <th className="px-6 py-4">रोल</th>
+                        <th className="px-6 py-4">एक्शन</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {users?.length ? users.map(user => (
+                        <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                          <td className="px-6 py-4 flex items-center gap-3">
+                            <img src={user.avatar} className="size-8 rounded-full" alt="" />
+                            <span className="font-medium">{user.name}</span>
+                          </td>
+                          <td className="px-6 py-4">{user.email}</td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
+                              user.role === 'admin' ? "bg-purple-100 text-purple-800" : "bg-slate-100 text-slate-800"
+                            )}>
+                              {user.role}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <button 
+                              onClick={() => handleDeleteUser(user.id)}
+                              disabled={user.role === 'admin'}
+                              className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-30"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-10 text-center text-slate-500">कोई उपयोगकर्ता नहीं मिला।</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
-            <h3 className="text-lg font-bold mb-6">ट्रेंडिंग टॉपिक्स</h3>
+            <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+              <Radio className="text-indigo-600 animate-pulse" size={20} /> AI Insights
+            </h3>
+            <div className="space-y-4">
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800">
+                <p className="text-xs font-bold text-indigo-600 mb-1 uppercase">Content Suggestion</p>
+                <p className="text-sm font-medium">"भारत की नई आर्थिक नीति" पर एक विस्तृत लेख लिखें, यह वर्तमान में ट्रेंड कर रहा है।</p>
+              </div>
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
+                <p className="text-xs font-bold text-emerald-600 mb-1 uppercase">Performance Tip</p>
+                <p className="text-sm font-medium">शॉर्ट वीडियो में "टेक" श्रेणी के वीडियो 40% अधिक देखे जा रहे हैं।</p>
+              </div>
+            </div>
+            
+            <h3 className="text-lg font-bold mt-8 mb-6">ट्रेंडिंग टॉपिक्स</h3>
             <div className="space-y-4">
               {['#G20Summit', '#WeatherAlert', '#BollyNews'].map((tag, i) => (
                 <div key={tag} className="flex items-center gap-4">
@@ -613,6 +983,8 @@ const AdminDashboard = () => {
 };
 
 const PublisherPage = () => {
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('edit');
   const [type, setType] = useState<'article' | 'short'>('article');
   const [formData, setFormData] = useState({
     title: '',
@@ -621,18 +993,81 @@ const PublisherPage = () => {
     video_url: '',
     category_id: 1,
     location: '',
-    is_breaking: false
+    is_breaking: false,
+    status: 'published'
   });
+  const [isAiWriting, setIsAiWriting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const { data: categories } = useFetch<Category[]>('/api/categories');
   const navigate = useNavigate();
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'image_url' | 'video_url') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formDataUpload = new FormData();
+    formDataUpload.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formDataUpload,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFormData(prev => ({ ...prev, [field]: data.url }));
+      } else {
+        alert('अपलोड विफल रहा।');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('अपलोड के दौरान त्रुटि हुई।');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (editId) {
+      fetch(`/api/news/${editId}`)
+        .then(res => res.json())
+        .then(data => {
+          setFormData({
+            title: data.title,
+            content: data.content,
+            image_url: data.image_url,
+            video_url: data.video_url || '',
+            category_id: data.category_id,
+            location: data.location,
+            is_breaking: data.is_breaking === 1,
+            status: data.status
+          });
+        });
+    }
+  }, [editId]);
+
+  const handleAiAssist = async () => {
+    if (!formData.title) {
+      alert("कृपया पहले एक शीर्षक या विषय लिखें।");
+      return;
+    }
+    setIsAiWriting(true);
+    const draft = await generateArticleDraft(formData.title);
+    if (draft) {
+      setFormData(prev => ({ ...prev, content: draft }));
+    }
+    setIsAiWriting(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const endpoint = type === 'article' ? '/api/news' : '/api/shorts';
+    const endpoint = editId ? `/api/news/${editId}` : (type === 'article' ? '/api/news' : '/api/shorts');
+    const method = editId ? 'PUT' : 'POST';
+    
     const payload = type === 'article' ? {
       ...formData,
       author_id: 1, // Mock admin user
-      status: 'published'
     } : {
       title: formData.title,
       video_url: formData.video_url,
@@ -640,14 +1075,14 @@ const PublisherPage = () => {
     };
 
     const res = await fetch(endpoint, {
-      method: 'POST',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
     if (res.ok) {
-      alert('सफलतापूर्वक प्रकाशित किया गया!');
-      navigate(type === 'article' ? '/' : '/shorts');
+      alert(editId ? 'सफलतापूर्वक अपडेट किया गया!' : 'सफलतापूर्वक प्रकाशित किया गया!');
+      navigate(type === 'article' ? '/admin' : '/shorts');
     }
   };
 
@@ -709,19 +1144,54 @@ const PublisherPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold mb-2">इमेज URL</label>
+                  <label className="block text-sm font-bold mb-2">इमेज अपलोड करें</label>
                   <div className="flex gap-2">
-                    <input 
-                      className="flex-1 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800"
-                      placeholder="https://..."
-                      value={formData.image_url}
-                      onChange={e => setFormData({...formData, image_url: e.target.value})}
-                    />
-                    <button type="button" className="bg-slate-100 p-3 rounded-xl"><Camera /></button>
+                    <div className="flex-1 relative">
+                      <input 
+                        className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800"
+                        placeholder="अपलोड किया गया पाथ यहाँ दिखेगा..."
+                        value={formData.image_url}
+                        readOnly
+                      />
+                      {isUploading && <div className="absolute right-3 top-3 animate-spin"><Hourglass size={18} /></div>}
+                    </div>
+                    <label className="bg-[#e42127] text-white p-3 rounded-xl cursor-pointer hover:bg-[#c41b21] transition-colors">
+                      <Upload size={20} />
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={e => handleFileUpload(e, 'image_url')}
+                        disabled={isUploading}
+                      />
+                    </label>
                   </div>
+                  {formData.image_url && (
+                    <div className="mt-2 relative group">
+                      <img src={formData.image_url} className="w-full h-40 object-cover rounded-xl border border-slate-200" alt="Preview" />
+                      <button 
+                        type="button"
+                        onClick={() => setFormData({...formData, image_url: ''})}
+                        className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <label className="block text-sm font-bold mb-2">कंटेंट (Content)</label>
+                  <label className="block text-sm font-bold mb-2 flex justify-between items-center">
+                    <span>कंटेंट (Content)</span>
+                    <button 
+                      type="button"
+                      onClick={handleAiAssist}
+                      disabled={isAiWriting}
+                      className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-full flex items-center gap-1 hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                    >
+                      <Radio size={14} className={isAiWriting ? "animate-pulse" : ""} />
+                      {isAiWriting ? "AI लिख रहा है..." : "AI से लिखवाएं"}
+                    </button>
+                  </label>
                   <textarea 
                     required
                     rows={8}
@@ -743,17 +1213,41 @@ const PublisherPage = () => {
               </>
             ) : (
               <div>
-                <label className="block text-sm font-bold mb-2">वीडियो URL</label>
+                <label className="block text-sm font-bold mb-2">वीडियो अपलोड करें</label>
                 <div className="flex gap-2">
-                  <input 
-                    required
-                    className="flex-1 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800"
-                    placeholder="https://..."
-                    value={formData.video_url}
-                    onChange={e => setFormData({...formData, video_url: e.target.value})}
-                  />
-                  <button type="button" className="bg-slate-100 p-3 rounded-xl"><Video /></button>
+                  <div className="flex-1 relative">
+                    <input 
+                      required
+                      className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800"
+                      placeholder="अपलोड किया गया वीडियो पाथ..."
+                      value={formData.video_url}
+                      readOnly
+                    />
+                    {isUploading && <div className="absolute right-3 top-3 animate-spin"><Hourglass size={18} /></div>}
+                  </div>
+                  <label className="bg-[#e42127] text-white p-3 rounded-xl cursor-pointer hover:bg-[#c41b21] transition-colors">
+                    <Video size={20} />
+                    <input 
+                      type="file" 
+                      accept="video/*" 
+                      className="hidden" 
+                      onChange={e => handleFileUpload(e, 'video_url')}
+                      disabled={isUploading}
+                    />
+                  </label>
                 </div>
+                {formData.video_url && (
+                  <div className="mt-2 relative group">
+                    <video src={formData.video_url} className="w-full h-40 object-cover rounded-xl border border-slate-200" controls />
+                    <button 
+                      type="button"
+                      onClick={() => setFormData({...formData, video_url: ''})}
+                      className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
